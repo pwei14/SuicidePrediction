@@ -12,7 +12,8 @@ from nltk.stem import WordNetLemmatizer
 
 # Download required NLTK data
 nltk.download('stopwords', quiet=True)
-nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
+# nltk.download('punkt_tab')
 nltk.download('wordnet', quiet=True)
 nltk.download('omw-1.4', quiet=True)
 
