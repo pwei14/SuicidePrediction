@@ -86,7 +86,7 @@ try:
                 lr_label = le.inverse_transform(logistic_model.predict(X_classical))[0]
                 nb_label = le.inverse_transform(nb_model.predict(X_classical))[0]
                 svm_label = le.inverse_transform(svm_model.predict(X_classical))[0]
-
+    
                 bilstm_prob = bilstm_model.predict(X_nn, verbose=0).flatten()[0]
                 bilstm_label = le.inverse_transform([(bilstm_prob > 0.5).astype(int)])[0]
 
@@ -95,6 +95,7 @@ try:
 
 
                 print(f"[DEBUG] BiLSTM   → Suicide: {bilstm_prob:.6f} | Non-Suicide: {1 - bilstm_prob:.6f}")
+                
                 print(f"[DEBUG] SimpleRNN → Suicide: {rnn_prob:.6f} | Non-Suicide: {1 - rnn_prob:.6f}")
 
             # --- Display Results ---
@@ -114,9 +115,9 @@ try:
             st.markdown('**Neural Network Models**')
             col4, col5 = st.columns(2)
             with col4:
-                st.metric('BiLSTM', bilstm_label, delta=f'Confidence: {bilstm_prob:.2%}')
+                st.metric('BiLSTM', bilstm_label, delta=f'Confidence: {bilstm_prob if bilstm_prob > 0.5 else 1 - bilstm_prob:.2%}')
             with col5:
-                st.metric('SimpleRNN', rnn_label, delta=f'Confidence: {rnn_prob:.2%}')
+                st.metric('SimpleRNN', rnn_label, delta=f'Confidence: {rnn_prob if rnn_prob > 0.5 else 1 - rnn_prob:.2%}')
 
             # Summary verdict: flag risk if majority of models say so
             risk_votes = [
