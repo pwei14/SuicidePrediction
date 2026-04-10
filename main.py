@@ -11,6 +11,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
+from langdetect import detect, LangDetectException
 
 # Download required NLTK data
 nltk.download('stopwords', quiet=True)
@@ -106,6 +107,15 @@ try:
             if user_input.strip() == '':
                 st.warning('Please enter some text first.')
             else:
+                try:
+                    lang = detect(user_input)
+                    if lang != 'en':
+                        st.error('🌐 Please input text in English only and try again.')
+                        st.stop()
+                except LangDetectException:
+                    st.error('⚠️ Could not detect language. Please input text in English and try again.')
+                    st.stop()
+
                 with st.spinner('Analyzing...'):
                     tokens = preprocess_text(user_input)
 
