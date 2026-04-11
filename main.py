@@ -42,21 +42,28 @@ def preprocess_text(text):
 
 def is_non_english(text):
     """
-    Returns True if the text is confidently detected as non-English.
-    Short texts (fewer than 4 words) are skipped to avoid false positives.
+    Returns True if the text is non-English.
+    - Immediately blocks text containing non-ASCII characters (Chinese, Arabic, etc.)
+    - Uses langdetect for Latin-script languages (e.g. Malay, French, etc.)
+    - Short texts under 4 words skip langdetect but still pass the ASCII check.
     """
-    words = text.strip().split()
-    if len(words) < 4:
-        return False  # Too short to reliably detect — assume English
+    stripped = text.strip()
+
+    # Block immediately if non-ASCII characters found (Chinese, Japanese, Arabic, etc.)
+    if not all(ord(c) < 128 for c in stripped if not c.isspace()):
+        return True
+
+    # Too short for reliable langdetect — assume English
+    if len(stripped.split()) < 4:
+        return False
 
     try:
-        langs = detect_langs(text)
+        langs = detect_langs(stripped)
         top = langs[0]
-        # Only block if top language is NOT English AND confidence > 80%
         if top.lang != 'en' and top.prob > 0.80:
             return True
     except LangDetectException:
-        pass  # Detection failed — assume English and continue
+        pass
 
     return False
 
