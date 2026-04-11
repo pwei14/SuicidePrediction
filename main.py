@@ -11,7 +11,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
-from langdetect import detect, LangDetectException
+from langdetect import detect_langs, LangDetectException
 
 # Download required NLTK data
 nltk.download('stopwords', quiet=True)
@@ -38,6 +38,26 @@ def preprocess_text(text):
     tokens = word_tokenize(text)
     tokens = [lemmatizer.lemmatize(word) for word in tokens]
     return tokens
+
+def is_non_english(text):
+    """
+    Returns True if the text is confidently detected as non-English.
+    Short texts (fewer than 4 words) are skipped to avoid false positives.
+    """
+    words = text.strip().split()
+    if len(words) < 4:
+        return False  # Too short to reliably detect — assume English
+
+    try:
+        langs = detect_langs(text)
+        top = langs[0]
+        # Only block if top language is NOT English AND confidence > 80%
+        if top.lang != 'en' and top.prob > 0.80:
+            return True
+    except LangDetectException:
+        pass  # Detection failed — assume English and continue
+
+    return False
 
 @st.cache_resource
 def load_artifacts():
@@ -107,13 +127,9 @@ try:
             if user_input.strip() == '':
                 st.warning('Please enter some text first.')
             else:
-                try:
-                    lang = detect(user_input)
-                    if lang != 'en':
-                        st.error('🌐 Please input text in English only and try again.')
-                        st.stop()
-                except LangDetectException:
-                    st.error('⚠️ Could not detect language. Please input text in English and try again.')
+                # --- Robust Language Detection ---
+                if is_non_english(user_input):
+                    st.error('🌐 Please input text in English only and try again.')
                     st.stop()
 
                 with st.spinner('Analyzing...'):
@@ -188,7 +204,7 @@ try:
 
                 # Majority vote verdict
                 all_labels = [v['label'] for v in results.values()]
-                risk_votes = all_labels.count('suicide')  # adjust to match your label encoder
+                risk_votes = all_labels.count('suicide')
                 total = len(all_labels)
 
                 st.divider()
