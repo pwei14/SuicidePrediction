@@ -19,7 +19,7 @@ nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 nltk.download('wordnet', quiet=True)
 nltk.download('omw-1.4', quiet=True)
-nltk.download('words', quiet=True)  # English dictionary
+nltk.download('words', quiet=True)
 
 # Page configuration
 st.set_page_config(page_title='Suicide Detection AI', page_icon='🧠', layout='wide')
@@ -32,6 +32,21 @@ lemmatizer = WordNetLemmatizer()
 
 # Load English word dictionary once
 english_dict = set(w.lower() for w in nltk.corpus.words.words())
+
+# Common Malay words blocklist (some may slip through NLTK dictionary)
+malay_blocklist = {
+    'saya', 'nak', 'aku', 'kau', 'dia', 'kami', 'kita', 'mereka',
+    'tidak', 'tak', 'ada', 'dan', 'atau', 'dengan', 'untuk', 'dari',
+    'ini', 'itu', 'yang', 'sudah', 'akan', 'boleh', 'mahu', 'ingin',
+    'rasa', 'hidup', 'mati', 'sakit', 'sedih', 'senang', 'susah',
+    'suka', 'benci', 'cinta', 'rindu', 'marah', 'takut', 'harap',
+    'dah', 'lah', 'pun', 'je', 'juga', 'masih', 'lagi', 'sangat',
+    'sekali', 'semua', 'pergi', 'datang', 'makan', 'minum', 'tidur',
+    'bangun', 'kerja', 'rumah', 'sekolah', 'keluarga', 'kawan', 'orang',
+    'macam', 'camne', 'camana', 'kenapa', 'siapa', 'mana', 'bila',
+    'berapa', 'bagaimana', 'mengapa', 'sebab', 'kerana', 'supaya',
+    'kalau', 'jika', 'walaupun', 'tetapi', 'tapi', 'namun', 'sungguh'
+}
 
 def preprocess_text(text):
     """Full preprocessing pipeline matching test_models.py"""
@@ -48,30 +63,32 @@ def is_non_english(text):
     """
     Returns True if the text is non-English.
     1. Blocks non-ASCII characters immediately (Chinese, Japanese, Arabic, etc.)
-    2. Checks how many words exist in the English dictionary
-    3. Falls back to langdetect for longer texts
+    2. Blocks if any known Malay word is detected
+    3. Checks English dictionary word ratio
+    4. Falls back to langdetect for longer texts
     """
     stripped = text.strip()
 
-    # Step 1: Block non-ASCII characters immediately (Chinese, Arabic, etc.)
+    # Step 1: Block non-ASCII immediately (Chinese, Arabic, Japanese, etc.)
     if not all(ord(c) < 128 for c in stripped if not c.isspace()):
         return True
 
-    # Step 2: Dictionary check — count how many words are valid English words
     words = [w.lower() for w in stripped.split() if w.isalpha()]
     if len(words) == 0:
         return False
 
+    # Step 2: Block if any Malay word found
+    for w in words:
+        if w in malay_blocklist:
+            return True
+
+    # Step 3: Dictionary ratio check - block if less than 60% are English words
     matched = sum(1 for w in words if w in english_dict)
     ratio = matched / len(words)
-
-    # If less than 40% of words are in English dictionary, block it
-    # e.g. "saya ingin mati" → 0/3 matched → 0% → blocked
-    # e.g. "i want to die"   → 3/4 matched → 75% → allowed
-    if ratio < 0.4:
+    if ratio < 0.6:
         return True
 
-    # Step 3: Extra langdetect check for longer texts (7+ words)
+    # Step 4: langdetect for longer texts
     if len(words) >= 7:
         try:
             langs = detect_langs(stripped)
@@ -190,7 +207,7 @@ try:
                     if 'BiLSTM' in selected_models:
                         bilstm_prob = bilstm_model.predict(X_nn, verbose=0).flatten()[0]
                         bilstm_label = le.inverse_transform([(bilstm_prob > 0.5).astype(int)])[0]
-                        print(f"[DEBUG] BiLSTM   → Suicide: {bilstm_prob:.6f} | Non-Suicide: {1 - bilstm_prob:.6f}")
+                        print(f"[DEBUG] BiLSTM   -> Suicide: {bilstm_prob:.6f} | Non-Suicide: {1 - bilstm_prob:.6f}")
                         results['BiLSTM'] = {
                             'label': bilstm_label,
                             'prob': bilstm_prob,
@@ -199,7 +216,7 @@ try:
                     if 'SimpleRNN' in selected_models:
                         rnn_prob = rnn_model.predict(X_nn, verbose=0).flatten()[0]
                         rnn_label = le.inverse_transform([(rnn_prob > 0.5).astype(int)])[0]
-                        print(f"[DEBUG] SimpleRNN → Suicide: {rnn_prob:.6f} | Non-Suicide: {1 - rnn_prob:.6f}")
+                        print(f"[DEBUG] SimpleRNN -> Suicide: {rnn_prob:.6f} | Non-Suicide: {1 - rnn_prob:.6f}")
                         results['SimpleRNN'] = {
                             'label': rnn_label,
                             'prob': rnn_prob,
