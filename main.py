@@ -19,6 +19,7 @@ nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 nltk.download('wordnet', quiet=True)
 nltk.download('omw-1.4', quiet=True)
+nltk.download('words', quiet=True)  # English dictionary
 
 # Page configuration
 st.set_page_config(page_title='Suicide Detection AI', page_icon='🧠', layout='wide')
@@ -28,6 +29,9 @@ stop_words = set(stopwords.words('english'))
 extra_stops = {'im', 'ive', 'dont', 'cant', 'didnt', 'wasnt', 'isnt', 'id', 'ill', 'youre', 'theyre', 'werent', 'hasnt', 'havent'}
 stop_words.update(extra_stops)
 lemmatizer = WordNetLemmatizer()
+
+# Load English word dictionary once
+english_dict = set(w.lower() for w in nltk.corpus.words.words())
 
 def preprocess_text(text):
     """Full preprocessing pipeline matching test_models.py"""
@@ -43,27 +47,39 @@ def preprocess_text(text):
 def is_non_english(text):
     """
     Returns True if the text is non-English.
-    - Immediately blocks text containing non-ASCII characters (Chinese, Arabic, etc.)
-    - Uses langdetect for Latin-script languages (e.g. Malay, French, etc.)
-    - Short texts under 4 words skip langdetect but still pass the ASCII check.
+    1. Blocks non-ASCII characters immediately (Chinese, Japanese, Arabic, etc.)
+    2. Checks how many words exist in the English dictionary
+    3. Falls back to langdetect for longer texts
     """
     stripped = text.strip()
 
-    # Block immediately if non-ASCII characters found (Chinese, Japanese, Arabic, etc.)
+    # Step 1: Block non-ASCII characters immediately (Chinese, Arabic, etc.)
     if not all(ord(c) < 128 for c in stripped if not c.isspace()):
         return True
 
-    # Too short for reliable langdetect — assume English
-    if len(stripped.split()) < 7:
+    # Step 2: Dictionary check — count how many words are valid English words
+    words = [w.lower() for w in stripped.split() if w.isalpha()]
+    if len(words) == 0:
         return False
 
-    try:
-        langs = detect_langs(stripped)
-        top = langs[0]
-        if top.lang != 'en' and top.prob > 0.95:
-            return True
-    except LangDetectException:
-        pass
+    matched = sum(1 for w in words if w in english_dict)
+    ratio = matched / len(words)
+
+    # If less than 40% of words are in English dictionary, block it
+    # e.g. "saya ingin mati" → 0/3 matched → 0% → blocked
+    # e.g. "i want to die"   → 3/4 matched → 75% → allowed
+    if ratio < 0.4:
+        return True
+
+    # Step 3: Extra langdetect check for longer texts (7+ words)
+    if len(words) >= 7:
+        try:
+            langs = detect_langs(stripped)
+            top = langs[0]
+            if top.lang != 'en' and top.prob > 0.95:
+                return True
+        except LangDetectException:
+            pass
 
     return False
 
