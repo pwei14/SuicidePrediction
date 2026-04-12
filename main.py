@@ -54,13 +54,13 @@ def is_non_english(text):
         return True
 
     # Too short for reliable langdetect — assume English
-    if len(stripped.split()) < 4:
+    if len(stripped.split()) < 7:
         return False
 
     try:
         langs = detect_langs(stripped)
         top = langs[0]
-        if top.lang != 'en' and top.prob > 0.80:
+        if top.lang != 'en' and top.prob > 0.95:
             return True
     except LangDetectException:
         pass
