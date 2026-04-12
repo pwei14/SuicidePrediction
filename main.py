@@ -296,7 +296,8 @@ try:
                     st.stop()
 
                 # --- Progress Bar Animation ---
-                st.subheader('⏳ Analyzing...')
+                analyzing_placeholder = st.empty()
+                analyzing_placeholder.subheader('⏳ Analyzing...')
                 progress_placeholder = st.empty()
 
                 model_steps = []
@@ -377,6 +378,7 @@ try:
 
                 time.sleep(0.4)
                 progress_placeholder.empty()
+                analyzing_placeholder.empty()
 
                 # --- Display Results ---
                 st.subheader('📊 Model Predictions')
