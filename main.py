@@ -5,6 +5,7 @@ import pickle
 import joblib
 import re
 import dill
+import time
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import nltk
@@ -33,7 +34,7 @@ lemmatizer = WordNetLemmatizer()
 # Load English word dictionary once
 english_dict = set(w.lower() for w in nltk.corpus.words.words())
 
-# Common Malay words blocklist (some may slip through NLTK dictionary)
+# Malay blocklist
 malay_blocklist = {
     'saya', 'nak', 'aku', 'kau', 'dia', 'kami', 'kita', 'mereka',
     'tidak', 'tak', 'ada', 'dan', 'atau', 'dengan', 'untuk', 'dari',
@@ -49,7 +50,6 @@ malay_blocklist = {
 }
 
 def preprocess_text(text):
-    """Full preprocessing pipeline matching test_models.py"""
     text = text.lower()
     text = re.sub(r'http\S+', '', text)
     text = re.sub(r'[^a-zA-Z\s]', '', text)
@@ -60,35 +60,19 @@ def preprocess_text(text):
     return tokens
 
 def is_non_english(text):
-    """
-    Returns True if the text is non-English.
-    1. Blocks non-ASCII characters immediately (Chinese, Japanese, Arabic, etc.)
-    2. Blocks if any known Malay word is detected
-    3. Checks English dictionary word ratio
-    4. Falls back to langdetect for longer texts
-    """
     stripped = text.strip()
-
-    # Step 1: Block non-ASCII immediately (Chinese, Arabic, Japanese, etc.)
     if not all(ord(c) < 128 for c in stripped if not c.isspace()):
         return True
-
     words = [w.lower() for w in stripped.split() if w.isalpha()]
     if len(words) == 0:
         return False
-
-    # Step 2: Block if any Malay word found
     for w in words:
         if w in malay_blocklist:
             return True
-
-    # Step 3: Dictionary ratio check - block if less than 60% are English words
     matched = sum(1 for w in words if w in english_dict)
     ratio = matched / len(words)
     if ratio < 0.6:
         return True
-
-    # Step 4: langdetect for longer texts
     if len(words) >= 7:
         try:
             langs = detect_langs(stripped)
@@ -97,8 +81,91 @@ def is_non_english(text):
                 return True
         except LangDetectException:
             pass
-
     return False
+
+def render_gauge(risk_ratio):
+    """Render a circular gauge using Plotly-like HTML/JS via streamlit components."""
+    percent = int(round(risk_ratio * 100))
+    if risk_ratio < 0.34:
+        color = '#639922'
+        level = 'Low Risk'
+    elif risk_ratio < 0.67:
+        color = '#EF9F27'
+        level = 'Medium Risk'
+    else:
+        color = '#E24B4A'
+        level = 'High Risk'
+
+    gauge_html = f"""
+    <div style="display:flex; align-items:center; gap:32px; background:white; border:0.5px solid #e0e0e0;
+                border-radius:12px; padding:20px 28px; margin-top:8px;">
+      <div style="position:relative; width:140px; height:80px; flex-shrink:0;">
+        <canvas id="gaugeCanvas" width="140" height="80"></canvas>
+      </div>
+      <div>
+        <div style="font-size:26px; font-weight:500; color:{color}; margin-bottom:4px;">{level}</div>
+        <div style="font-size:13px; color:#888; margin-bottom:10px;">Overall risk score: {percent}%</div>
+      </div>
+    </div>
+    <script>
+    (function() {{
+      var canvas = document.getElementById('gaugeCanvas');
+      var ctx = canvas.getContext('2d');
+      var cx = 70, cy = 76, r = 56;
+      var zones = [
+        {{ end: 0.33, color: '#639922' }},
+        {{ end: 0.66, color: '#EF9F27' }},
+        {{ end: 1.0,  color: '#E24B4A' }}
+      ];
+      var riskRatio = {risk_ratio};
+
+      zones.forEach(function(z, i) {{
+        var prev = i === 0 ? 0 : zones[i-1].end;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, Math.PI + prev * Math.PI, Math.PI + z.end * Math.PI);
+        ctx.lineWidth = 13;
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+        ctx.lineCap = 'butt';
+        ctx.stroke();
+      }});
+
+      var filled = 0;
+      zones.forEach(function(z, i) {{
+        var prev = i === 0 ? 0 : zones[i-1].end;
+        var end = Math.min(riskRatio, z.end);
+        if (end > prev) {{
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, Math.PI + prev * Math.PI, Math.PI + end * Math.PI);
+          ctx.lineWidth = 13;
+          ctx.strokeStyle = z.color;
+          ctx.lineCap = 'butt';
+          ctx.stroke();
+        }}
+      }});
+
+      var needleAngle = Math.PI + riskRatio * Math.PI;
+      var nx = cx + (r - 8) * Math.cos(needleAngle);
+      var ny = cy + (r - 8) * Math.sin(needleAngle);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(nx, ny);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#444';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = '#444';
+      ctx.fill();
+
+      ctx.font = '500 12px sans-serif';
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'center';
+      ctx.fillText('{percent}%', cx, cy - 16);
+    }})();
+    </script>
+    """
+    st.components.v1.html(gauge_html, height=120)
 
 @st.cache_resource
 def load_artifacts():
@@ -121,6 +188,62 @@ ALL_MODELS = [
     'BiLSTM',
     'SimpleRNN',
 ]
+
+# Color card CSS
+st.markdown("""
+<style>
+.result-card {
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 6px;
+}
+.card-suicide {
+    background-color: #FCEBEB;
+    border: 1px solid #F09595;
+}
+.card-non-suicide {
+    background-color: #EAF3DE;
+    border: 1px solid #97C459;
+}
+.card-model-name {
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 4px;
+}
+.card-label-suicide {
+    font-size: 22px;
+    font-weight: 600;
+    color: #A32D2D;
+}
+.card-label-non-suicide {
+    font-size: 22px;
+    font-weight: 600;
+    color: #3B6D11;
+}
+.card-conf {
+    font-size: 12px;
+    margin-top: 6px;
+    color: #666;
+}
+.conf-bar-bg {
+    background: rgba(0,0,0,0.08);
+    border-radius: 99px;
+    height: 5px;
+    margin-top: 4px;
+    overflow: hidden;
+}
+.conf-bar-fill-suicide {
+    height: 100%;
+    border-radius: 99px;
+    background: #E24B4A;
+}
+.conf-bar-fill-non-suicide {
+    height: 100%;
+    border-radius: 99px;
+    background: #639922;
+}
+</style>
+""", unsafe_allow_html=True)
 
 try:
     vectorizer, le, logistic_model, nb_model, svm_model, bilstm_model, rnn_model, tokenizer_nn = load_artifacts()
@@ -168,60 +291,92 @@ try:
             if user_input.strip() == '':
                 st.warning('Please enter some text first.')
             else:
-                # --- Robust Language Detection ---
                 if is_non_english(user_input):
                     st.error('🌐 Please input text in English only and try again.')
                     st.stop()
 
-                with st.spinner('Analyzing...'):
-                    tokens = preprocess_text(user_input)
+                # --- Progress Bar Animation ---
+                st.subheader('⏳ Analyzing...')
+                progress_placeholder = st.empty()
 
-                    needs_classical = any(m in selected_models for m in ['Logistic Regression', 'Naive Bayes', 'LinearSVC'])
-                    needs_nn = any(m in selected_models for m in ['BiLSTM', 'SimpleRNN'])
+                model_steps = []
+                if 'Logistic Regression' in selected_models:
+                    model_steps.append('Logistic Regression')
+                if 'Naive Bayes' in selected_models:
+                    model_steps.append('Naive Bayes')
+                if 'LinearSVC' in selected_models:
+                    model_steps.append('LinearSVC')
+                if 'BiLSTM' in selected_models:
+                    model_steps.append('BiLSTM')
+                if 'SimpleRNN' in selected_models:
+                    model_steps.append('SimpleRNN')
 
-                    if needs_classical:
-                        X_classical = vectorizer.transform([tokens])
+                tokens = preprocess_text(user_input)
+                needs_classical = any(m in selected_models for m in ['Logistic Regression', 'Naive Bayes', 'LinearSVC'])
+                needs_nn = any(m in selected_models for m in ['BiLSTM', 'SimpleRNN'])
 
-                    if needs_nn:
-                        MAX_LEN = 200
-                        X_nn_seq = tokenizer_nn.texts_to_sequences([tokens])
-                        X_nn = pad_sequences(X_nn_seq, maxlen=MAX_LEN, padding='post', truncating='post')
+                if needs_classical:
+                    X_classical = vectorizer.transform([tokens])
+                if needs_nn:
+                    MAX_LEN = 200
+                    X_nn_seq = tokenizer_nn.texts_to_sequences([tokens])
+                    X_nn = pad_sequences(X_nn_seq, maxlen=MAX_LEN, padding='post', truncating='post')
 
-                    results = {}
+                results = {}
+                completed = []
 
-                    if 'Logistic Regression' in selected_models:
+                for step in model_steps:
+                    with progress_placeholder.container():
+                        for s in model_steps:
+                            if s in completed:
+                                st.progress(1.0, text=f'✅ {s} — done')
+                            elif s == step:
+                                st.progress(0.6, text=f'⏳ {s} — running...')
+                            else:
+                                st.progress(0.0, text=f'🔲 {s} — waiting')
+
+                    if step == 'Logistic Regression':
                         results['Logistic Regression'] = {
                             'label': le.inverse_transform(logistic_model.predict(X_classical))[0],
                             'type': 'classical'
                         }
-                    if 'Naive Bayes' in selected_models:
+                    elif step == 'Naive Bayes':
                         results['Naive Bayes'] = {
                             'label': le.inverse_transform(nb_model.predict(X_classical))[0],
                             'type': 'classical'
                         }
-                    if 'LinearSVC' in selected_models:
+                    elif step == 'LinearSVC':
                         results['LinearSVC'] = {
                             'label': le.inverse_transform(svm_model.predict(X_classical))[0],
                             'type': 'classical'
                         }
-                    if 'BiLSTM' in selected_models:
+                    elif step == 'BiLSTM':
                         bilstm_prob = bilstm_model.predict(X_nn, verbose=0).flatten()[0]
                         bilstm_label = le.inverse_transform([(bilstm_prob > 0.5).astype(int)])[0]
-                        print(f"[DEBUG] BiLSTM   -> Suicide: {bilstm_prob:.6f} | Non-Suicide: {1 - bilstm_prob:.6f}")
                         results['BiLSTM'] = {
                             'label': bilstm_label,
-                            'prob': bilstm_prob,
+                            'prob': float(bilstm_prob),
                             'type': 'nn'
                         }
-                    if 'SimpleRNN' in selected_models:
+                    elif step == 'SimpleRNN':
                         rnn_prob = rnn_model.predict(X_nn, verbose=0).flatten()[0]
                         rnn_label = le.inverse_transform([(rnn_prob > 0.5).astype(int)])[0]
-                        print(f"[DEBUG] SimpleRNN -> Suicide: {rnn_prob:.6f} | Non-Suicide: {1 - rnn_prob:.6f}")
                         results['SimpleRNN'] = {
                             'label': rnn_label,
-                            'prob': rnn_prob,
+                            'prob': float(rnn_prob),
                             'type': 'nn'
                         }
+
+                    completed.append(step)
+                    time.sleep(0.3)
+
+                # Mark all done
+                with progress_placeholder.container():
+                    for s in model_steps:
+                        st.progress(1.0, text=f'✅ {s} — done')
+
+                time.sleep(0.4)
+                progress_placeholder.empty()
 
                 # --- Display Results ---
                 st.subheader('📊 Model Predictions')
@@ -233,28 +388,57 @@ try:
                     st.markdown('**Classical ML Models**')
                     cols = st.columns(len(classical_results))
                     for col, (name, res) in zip(cols, classical_results.items()):
+                        label = res['label']
+                        card_class = 'card-suicide' if label == 'suicide' else 'card-non-suicide'
+                        label_class = 'card-label-suicide' if label == 'suicide' else 'card-label-non-suicide'
                         with col:
-                            st.metric(name, res['label'])
+                            st.markdown(f"""
+                            <div class="result-card {card_class}">
+                                <div class="card-model-name">{name}</div>
+                                <div class="{label_class}">{label}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
 
                 if nn_results:
                     st.markdown('**Neural Network Models**')
                     cols = st.columns(len(nn_results))
                     for col, (name, res) in zip(cols, nn_results.items()):
+                        label = res['label']
+                        prob = res['prob']
+                        card_class = 'card-suicide' if label == 'suicide' else 'card-non-suicide'
+                        label_class = 'card-label-suicide' if label == 'suicide' else 'card-label-non-suicide'
+                        fill_class = 'conf-bar-fill-suicide' if label == 'suicide' else 'conf-bar-fill-non-suicide'
+                        bar_width = int(prob * 100)
                         with col:
-                            st.metric(name, res['label'], delta=f"Confidence: {res['prob']:.2%}")
+                            st.markdown(f"""
+                            <div class="result-card {card_class}">
+                                <div class="card-model-name">{name}</div>
+                                <div class="{label_class}">{label}</div>
+                                <div class="card-conf">Suicide probability: {prob:.2%}</div>
+                                <div class="conf-bar-bg">
+                                    <div class="{fill_class}" style="width:{bar_width}%;"></div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
 
-                # Majority vote verdict
+                # --- Gauge + Overall Assessment ---
                 all_labels = [v['label'] for v in results.values()]
                 risk_votes = all_labels.count('suicide')
                 total = len(all_labels)
+                risk_ratio = risk_votes / total
 
                 st.divider()
                 st.subheader('🔍 Overall Assessment')
+
+                render_gauge(risk_ratio)
+
+                st.markdown(f"**{risk_votes}/{total} models** flagged as suicide risk.")
+
                 if risk_votes >= (total / 2 + 1):
-                    st.error(f'⚠️ High risk detected ({risk_votes}/{total} models flagged). Please reach out for help.')
+                    st.error(f'⚠️ High risk detected. Please reach out for help.')
                     st.info('**Malaysia Befrienders KL:** 03-7627 2929  |  **Crisis Text:** Text HOME to 741741')
                 else:
-                    st.success(f'✅ Low risk detected ({risk_votes}/{total} models flagged).')
+                    st.success(f'✅ Low risk detected.')
 
 except Exception as e:
     st.error(f'Error loading models: {e}')
